@@ -1,0 +1,386 @@
+---
+title: "QTA Assignment 2"
+author: "Kevin Hardegger"
+date: "5/4/2020"
+output: html_document
+---
+
+In this assignment we create a machine learning model that helps us predicting classification values. Our data set contains various headlines of which a few are quoted with "yes" and "no" values in regards to the question, if the headlines are related to sanctions. The goal is to design a model with which we can predict the values of the headlines missing this information. 
+
+### 1. Overview
+
+Loading Packages:
+
+```{r, message = FALSE}
+packages = c("dplyr", "quanteda", "readtext", 
+             "ggplot2", "tidytext", "scales", 
+             "textdata","readr", "tibble", "DT", 
+             "ggplot2", "stringr",  "caret")
+
+sapply(packages, require, character.only = TRUE)
+```
+
+Loading data set:
+
+```{r}
+data = read.csv("fca_headlines.csv")
+```
+
+Let's have a look at our data set:
+
+As we can see, the data set includes three columns; date, text, and sanction. We notice that the majority of
+the values in the column "sanction" are NA. Furtermore, all columns are typed as factors. We will need to address this error and change column "text" to a character type. 
+
+```{r}
+head(data, 8)
+```
+
+The following code suggests that around 93% of our data haven't got an assigned value to the column "sanction". Moreover, we have 863 "no" and 144 "yes" values for our training set.
+
+```{r}
+is_na = sum(is.na(data$sanction))
+num_row = nrow(data)
+per_na = is_na/num_row
+percent(per_na)
+table(data$sanction)
+```
+
+### 2. Processing Data set 
+
+As a first step, we prepare our data set for modelling:
+
+We start creating a clean data set for training our model by removing the date column as our focus lies on the text. We also add an ID column in case we need to identify our results later on. Lastly, we remove the na values, and use "yes" as our category of reference. We're left with 1007 observations and 3 columns. 
+
+```{r}
+data_train = data %>%
+  select(-date) %>%
+  mutate(ID = seq.int(nrow(data))) %>%
+  mutate(text = as.character(data$text)) %>%
+  filter(!is.na(sanction)) %>%
+  mutate(sanction = relevel(sanction, "yes"))
+
+dim(data_train)
+``` 
+
+Data Frame Matrix:
+
+Next step is to create a data frame matrix (dfm). For this we first need to create a corpus of our text. We then choose the text of our dfm to be adjusted with the inverse document frequency (tf-idf) method to give value to the importance of a word. We follow this logic as our number of observations are rather small and the tf-idf method tends to give a higher value to words that are rather rarely used. Thus helping our model to find significant words with higher meaning behind them. In addition, because of the low number of observations, we set that the minimum frequency of a word has to equal at least three. By doing this, we find a reasonable middle ground in combination with tf-idf, as we eliminate the risk of having words that receive too high value while in fact not being of significance.
+
+```{r, message = FALSE}
+# create corpus
+data_corpus = corpus(data_train$text)
+
+# create dfm 
+dfm_tfidf =  dfm(data_corpus,
+             remove=stopwords("english"),
+             remove_url=TRUE,
+             remove_punct=TRUE,
+             split_hyphens=TRUE,
+             remove_symbols=TRUE,
+             remove_numbers=TRUE,
+             verbose=TRUE) %>%
+  dfm_trim(min_docfreq = 3,
+           verbose=TRUE) %>%
+  dfm_tfidf()
+dfm_tfidf
+```
+
+
+### 3. Modelling 
+
+As we have finished preparing our data we start modelling three different machine learning methods and try to figure out which one produces the most accurate predictions.
+
+#### 3.1 Partitioning
+
+We start by partitioning our training data into a training and test set according to a ratio of 4:1.$
+
+```{r, message = FALSE}
+# set Index ratio 4:1
+set.seed(69)
+trainIndex <- createDataPartition(data_train$sanction,
+                                  p = 0.8,
+                                  list = FALSE,
+                                  times = 1) %>%
+  as.numeric()
+
+# partition data
+train_dfm_tfidf <- dfm_tfidf[trainIndex,]
+test_dfm_tfidf <- dfm_tfidf[-trainIndex,]
+```
+
+Transform and refactor our two sets to correct form.
+```{r}
+train_df_tfidf <- train_dfm_tfidf %>%
+  as.matrix() %>%
+  as.data.frame()
+
+test_df_tfidf <- test_dfm_tfidf %>%
+  as.matrix() %>%
+  as.data.frame()
+
+train_response_tfidf <- as.factor(data_train$sanction[trainIndex])
+test_response_tfidf <- as.factor(data_train$sanction[-trainIndex])
+```
+
+We set our control method to a 5-fold Cross Validation as it's best practice.
+
+```{r}
+
+trctrl <- trainControl(method = "cv", number = 5, verboseIter = FALSE)
+
+```
+
+#### 3.2 Training and Testing Models
+
+We build three models based on Support Vector Machines, Naive Bayes, and Random Forest. 
+
+Our first model is the Support Vector Machine:
+
+The results show that the model generates five type 1 errors (false positives), as well as one type 2 erros (false negatives). The F1 score equals 0.8846.
+
+```{r}
+# train SVM
+
+svm_mod_tfidf <- train(x = train_df_tfidf,
+                 y = train_response_tfidf,
+                 method = "svmLinearWeights2",
+                 trControl = trctrl,               
+                 tuneGrid = data.frame(cost = 1, 
+                                       Loss = 0, 
+                                       weight = 1))
+# predict SVM results
+
+svm_pred_tfidf <- predict(svm_mod_tfidf,             
+                    newdata = test_df_tfidf)
+
+svm_cm_tfidf <- confusionMatrix(svm_pred_tfidf, test_response_tfidf, mode = "prec_recall")
+svm_cm_tfidf
+
+```
+
+Our second model is Naive-Bayes:
+
+Surprisingly, this model estimates that every single headline is related to a sanction, hence producing 172 false negatives. The F1 score is subsequently low at 0.2456.
+
+```{r}
+# train Naive-Bayes 
+
+nb_mod_tfidf <- train(x = train_df_tfidf,
+                y = train_response_tfidf,
+                method = "naive_bayes",
+                trControl = trctrl,
+                tuneGrid = data.frame(laplace = 1,
+                                      usekernel = FALSE,
+                                      adjust = FALSE))
+# predict NB results
+
+nb_pred_tfidf <- predict(nb_mod_tfidf,
+                   newdata = test_df_tfidf)
+
+nb_cm_tfidf <- confusionMatrix(nb_pred_tfidf, test_response_tfidf, mode = "prec_recall")
+nb_cm_tfidf
+
+```
+
+
+Our last model is a Random Forest:
+
+The results presents the model causing seven type 1 errors, but no type 2 erros in contrast. The F1 score  equals 0.8571.
+
+```{r}
+# train Random Forest 
+
+rf_mod_tfidf <- train(x = train_df_tfidf, 
+                y = train_response_tfidf, 
+                method = "ranger",
+                trControl = trctrl,
+                tuneGrid = data.frame(mtry = floor(sqrt(dim(train_df_tfidf)[2])),
+                                      splitrule = "gini",
+                                      min.node.size = 1))
+
+# predict RF results 
+rf_pred_tfidf <- predict(rf_mod_tfidf,
+                   newdata = test_df_tfidf)
+
+rf_cm_tfidf<- confusionMatrix(rf_pred_tfidf, test_response_tfidf, mode = "prec_recall")
+rf_cm_tfidf
+
+
+```
+
+In summary, the Support Vector Machine model performed the best by a slight margin. 
+This is also observable in the chart below: 
+
+```{r}
+mod_results <- rbind(
+  svm_cm_tfidf$overall,
+  nb_cm_tfidf$overall,
+  rf_cm_tfidf$overall
+) %>%
+  as.data.frame() %>%
+  mutate(model = c("Support Vector Machine",
+                   "Naive-Bayes",
+                   "Random Forest"))
+
+mod_results %>%
+  ggplot(aes(model, Accuracy)) +
+  geom_point() +
+  ylim(0, 1) +
+  xlab("Model") +
+  geom_hline(yintercept = mod_results$AccuracyNull[1],
+             color = "dodgerblue") +
+  coord_flip()
+
+```
+
+### 4. Predict Values 
+
+According to our results we choose the Support Vector Machine as our preferred method and continue with applying such model on the complete training data set. We follow similar steps as before but now with the complete data set and start by transforming the data frame according to the before specified data frame matrix, followed by fitting the model on the training data. 
+
+```{r}
+# transform and refactor
+train_df = dfm_tfidf  %>%
+  as.matrix() %>%
+  as.data.frame()
+
+train_response <- as.factor(data_train$sanction)
+
+```
+
+
+```{r}
+# train SVM model
+
+svm_mod = train(x = train_df,
+                 y = train_response,
+                 method = "svmLinearWeights2",
+                 trControl = trctrl,               
+                 tuneGrid = data.frame(cost = 1, 
+                                       Loss = 0, 
+                                       weight = 1))
+
+```
+
+We adapt our data set accordingly and create our test set. We apply the same methods as before when we specififed the trainig set but now remove the observations that have speficied values in the "sanction" column. We are left with 14'405 observations and 3 columns. 
+
+```{r}
+
+data_test = data %>%
+  select(-date) %>%
+  mutate(ID = seq.int(nrow(data))) %>%
+  mutate(text = as.character(data$text)) %>%
+  filter(is.na(sanction)) %>%
+  mutate(sanction = relevel(sanction, "yes"))
+
+dim(data_test)
+
+head(data_test)
+```
+
+Again, we follow the same steps as before with creating a corpus and a data frame matrix similar to our training dfm (dfm_tfidf).
+
+```{r}
+# create corpus
+data_corpus_test = corpus(data_test$text)
+
+# create dfm 
+
+dfm_test =  dfm(data_corpus_test,
+                      stem=TRUE,
+                      remove=stopwords("english"),
+                      remove_punct=TRUE) %>%
+  dfm_match(featnames(dfm_tfidf)) %>% 
+  as.matrix() %>%
+  as.data.frame()
+
+```
+
+Finally, we are able to predict the values. We add the results to our test data set. 
+
+```{r}
+# predict values
+
+svm_pred <- predict(svm_mod,
+                    newdata = dfm_test)
+
+# add to test data set
+
+data_test$prediction = svm_pred
+
+head(data_test, 8)
+```
+
+### 5. Tasks
+#### 5.1 What share of the non-labeled headlines are related to regulatory enforcement?
+
+To solve this task we count how many headlines our model gave the value "yes" and "no".
+We start with the number of yes values. We can see that our predictions have a total of 305 yes values.
+
+```{r}
+data_test %>%
+  count(prediction) %>%
+  filter(prediction %in% "yes")
+
+```
+
+Next we can examine the number of "no" values to be 14'100.
+
+```{r}
+data_test %>%
+  count(prediction) %>%
+  filter(prediction %in% "no")
+
+```
+
+The calculation for the percentage of "yes" values is easily done. 
+Apparently, our model predicted 2% of total headlines to be related to regularoty enforcement.
+
+```{r}
+percent(305/(305+14100))
+        
+```
+
+#### 5.2 Check for False Positives for the following sentences:
+"Iceland enjoys a fine summer."
+"A world apart - the growing penalies of being offline."
+"The fine line between privacy and secrecy."
+
+First, we have to find the three sentences. 
+As we can see, they weren't labeled with NA values to begin with.
+
+```{r}
+data_test %>%
+  filter(str_detect(text,"Iceland enjoys") | str_detect(text,"A world apart") | str_detect(text,"The fine line"))
+
+```
+
+Thus, we try to find them in the original data set. As shown below, we can't find all three sentences in our data set. Nevertheless, we see that two of the sentences possess the value "no" in the column sanction. 
+
+```{r}
+data %>%
+  filter(str_detect(text,"Iceland enjoys") | str_detect(text,"A world apart") | str_detect(text,"The fine line"))
+
+```
+
+We change our approach and create a vector containing all three strings and then predict their values by running the fitted SVM model through it. The result shows that our model predicts every sentence to be not related with sanctions, which is correct. Thus, we can suggest that our model is well trained for accurate prediction. 
+
+```{r}
+type1= c("Iceland enjoys a fine summer.",
+           "A world apart - the growing penalies of being offline.",
+           "The fine line between privacy and secrecy.")
+
+type1_df <- corpus(type1) %>%
+  dfm(stem=TRUE,
+      remove=stopwords("english"),
+      remove_punct=TRUE) %>%
+  dfm_match(featnames(dfm_tfidf)) %>% 
+  as.matrix() %>%
+  as.data.frame()
+
+svm_type1 <- predict(svm_mod,
+                    newdata = type1_df)
+svm_type1
+
+```
+
+

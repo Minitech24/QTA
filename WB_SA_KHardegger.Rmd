@@ -1,0 +1,213 @@
+---
+title: "Warren Buffett Sentiment Analysis"
+author: "Kevin Hardegger"
+date: "3/31/2020"
+output: html_document
+---
+
+In this assignment we will perform a sentiment analyis on the yearly letters from 1977 to 2019 written personally by Warren Buffet.
+
+We will have a closer look at the most words used, see which words have the most impact on sentiment value and compare the sentiment value with the stock returns realized by Berkshire & Hathaway of the following year. This helps us to examine if the expectations set by Warren Buffett are of informative and predictive value.
+
+
+## 1. Preparation
+
+As a first step, we load the packages necessary for our analysis.
+
+```{r, message=FALSE}
+packages = c("dplyr", "quanteda", "readtext", 
+             "ggplot2", "here", "tidytext", 
+             "textdata", "quanteda.dictionaries",
+             "readr", "tibble", "cld3", "ggplot2", 
+             "sentimentr", "forcats", "XML", "tidyr")
+
+sapply(packages, require, character.only = TRUE)
+```
+
+Our preferred dictionary will be the Loughran dictionary. It has been specifically developed for financial sentiment terms and will divide our words into six different sentiments:
+
+“positive”, “negative”, “litigious”, “uncertain”, “constraining”, and “superfluous”.
+
+```{r}
+loughran = get_sentiments("loughran")
+loughran %>% count(sentiment)
+```
+
+
+As our next step, we read our letters and put them in a dataframe and subsequently split the texts into single tokens. 
+
+```{r}
+text <- readtext(here("buffett"),
+                 docvarsfrom = "filenames", 
+                 docvarnames = c("author", "year"),
+                 dvsep = "_")
+
+text <- text %>%
+  unnest_tokens(word, text) %>%
+  ungroup()
+```
+
+## 2. Analyzing the Letters
+
+Now, after we created our tokens we can remove unnecessary stop words and count which words have been used the most in all letters combined. 
+
+```{r}
+text = text %>% 
+  anti_join(stop_words) 
+  
+text %>% 
+  count(word, sort =TRUE) %>%
+  top_n(12, n) %>%
+  mutate(word = reorder(word, n)) %>%
+  ggplot(aes(word, n)) +
+  geom_col(fill="tan1" ) +
+  coord_flip() +
+  labs(x = "Word", y = "Word Count")
+  
+```
+
+We see that all of these words are nouns without much emotional meaning. Thus we will examine our tokens with the Loughran dictionary next.
+
+```{r}
+text %>% 
+  inner_join(get_sentiments("loughran"), by = "word") %>%
+  count(word, sort =TRUE) %>%
+  top_n(12, n) %>%
+  mutate(word = reorder(word, n)) %>%
+  ggplot(aes(word, n)) +
+  geom_col(fill="seagreen3" ) +
+  coord_flip() +
+  labs(x = "Word", y = "Word Count")
+  
+```
+
+As we can see, Loughran dictionary gives us a completely different output than before with words possessing more substantive sentiment to them. The next part will show which sentiment groups have the most tokens.
+```{r}
+text %>% 
+  inner_join(get_sentiments("loughran"), by = "word") %>%
+  count(sentiment, sort =TRUE) %>%
+  mutate(sentiment = reorder(sentiment, n)) %>%
+  top_n(12, n) %>%
+  ggplot(aes(sentiment, n)) +
+  geom_col(fill="violet" ) +
+  coord_flip() +
+  labs(x = "Sentiment", y = "Word Count")
+
+```
+
+Apparentely, negative and positive sentiments are the most given in Warren Buffets letter. The next chart will give us more insight for each sentiment groups. It explains us the most used words for each sentiment group. We notice the amount of negatively afflicted words outweighing others, such as loss, require, and risk.
+
+```{r}
+
+text %>%
+  count(word, sort = TRUE) %>%
+  inner_join(get_sentiments("loughran"), by = "word") %>%
+  group_by(sentiment) %>%
+  top_n(5, n) %>%
+  ungroup() %>%
+  mutate(word = reorder(word, n)) %>%
+  ggplot(aes(word, n, fill=sentiment)) +
+  geom_col() +
+  coord_flip() + 
+  facet_wrap(~ sentiment, scales = "free") +
+  labs("Words", "Frequency of words")
+
+  
+```
+
+We can do the same to figure out which words have been used the most for each year. 
+
+```{r eval=FALSE}
+text %>%
+  inner_join(get_sentiments("loughran"), by = "word") %>%
+  count(year, word) %>% ## bis hier okay
+  group_by(year) %>%
+  top_n(5, n) %>%
+  ggplot(aes(word, n, fill=year)) +
+  geom_col() +
+  coord_flip() + 
+  facet_wrap(~ year, scales ="free") +
+  labs("Words", "Frequency of words")
+
+```
+
+Unfortunately, this code gives us an unreadable output because of the large number of years. Therefore we will try to gain insight into the different years by creating an output using the tidyr package. 
+```{r}
+table_year = text %>%
+  inner_join(get_sentiments("loughran"), by = "word") %>%
+  count(sentiment, year) %>% 
+  spread(sentiment, n, fill = 0)
+
+print.data.frame(table_year)
+
+```
+
+The table above outlines how many words of each sentiment exist in each year. Interestingly, we can immediately notice the same pattern that negative sentiment outweighs positive and every other sentiment in almost every year. Moreover, positive and negative words increase in the years before the financial crisis in 2008 and the stock market crash in 2015.
+
+
+## 3. Creating a Linear model
+
+To see if the sentiments derived by the loughran dictionary may be relevant in explaining current and future returns, we build multiple regression models and examine each sentiment category for its significance. 
+
+
+For this we use two different dataframes: 
+
+In the first dataframe we add the stock returns of Berkshire & Hathaway of the current year in which the letter was written. For this we join our table including sentiment word counts grouped by year (table_year) with the file that includes the Berkshire & Hathaway stock returns (berkshire_retunr_single.csv) as follows: 
+
+```{r}
+berk_returns = read.csv("berkshire_return_single.csv", sep=";")
+table_returns_t1 = inner_join(table_year, berk_returns, by = "year")
+print.data.frame(table_returns_t1)
+```
+
+
+For our second dataframe we write a csv file and then add the stock returns of Berkshire & Hathaway of the following year i.e. 1978 to 2018 to it and delete the last row, as we have no returns for 2020 yet. 
+
+```{r}
+write.csv(table_year, "berkshire_sentiment.csv")
+table_returns_t2 = read.csv("berkshire_returns_t2.csv", sep=";")
+print.data.frame(table_returns_t2)
+
+```
+
+For both multiple regression models we use all sentiment groups as x-values and the stock return of the current or following year as our y-value. 
+
+We begin with the model for our first dataframe:
+
+```{r}
+lm_t1 = lm(return ~ constraining + litigious + negative + positive + superfluous + uncertainty,
+         data=table_returns_t1)
+
+summary(lm_t1)
+
+```
+
+As we can see our linear model suggests us a negative relationship between the categories negative and litigious to the stock returns. In other words, the higher the count of negative and litigious words the lower the stock return. All the other categories seem to have a positive relationship. Nevertheless, the coefficients are very small and by having a look at the p-value we can determine that none of the coefficients for the sentiments are significant differnet to zero. 
+
+
+Lastly, we build our second model to test if the sentiment categories have any prediction value:
+ 
+```{r}
+
+lm_t2 = lm(return_t2 ~ constraining + litigious + negative + positive + superfluous + uncertainty,
+         data=table_returns_t2)
+
+summary(lm_t2)
+
+```
+
+In contrast to the first model, in the second model all coefficients are negative which means that every sentiment has a negative relationship to future stock returns. Furthermore, the output clarifies once again that every sentiment is of no signifance.
+
+## 4. Summary
+
+Our analysis presents us various results. First, unsurprisingly the most used words including sentiment are very much different from the most used words overall.
+
+Second, most words with sentiment value are negative. In fact, the amount of negative words are about the same as positive and uncertain words combined. Grouping the words to their respective category reveals us that the words have the biggest impact on sentiment are: "loss, losses, gain, gains, risk"
+
+Third, we couldn't find any signifant linear relationship between the sentiment categories and the stock returns of Berkshire & Hathway. Neither for the first nor for our second model. In addition, all coefficients in our second model are negative which is kind of unintuitive. However, this may lie within the problem that our data set is too small, we could specify our model differently, and another prediction model may have done better as well. Nevertheless, this is out of scope of this analysis. 
+
+Finally, we mustn't forget that our results are based on the Loughran dictionary. We have to bear in mind that other dicitonaries most probably would have lead to different results. However, the Loughran dictionary has been explicitly chosen as it was specifically designed to analyse financial texts.
+
+
+
+
