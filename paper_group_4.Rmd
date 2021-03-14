@@ -1,7 +1,9 @@
 ---
-title: "QTA Paper Group 4"
+title: "Writing Right"
+subtitle: "Evaluating the alleged political shift of Neue Zürcher Zeitung"
 author: "Daniil Bulat, Kevin Hardegger, Christoph Heinimann"
 date: "03/06/2020"
+abstract: "In recent years, the Neue Zürcher Zeitung (NZZ), a major newspaper based in Switzerland, has come under fire from allegations that its content and political view have shifted increasingly to the political right. This paper examines these claims by analyzing headlines and teasers of NZZ articles based on their sentiment and evaluates if such a shift truly came into effect. For this, a total of 17'095 articles of the front pages of nzz.ch between 2013 and 2020 are scraped from the web. To test the claims made, the data is filtered into two topics, immigration and the far-right German party Alternative für Deutschland (AfD), which is then submitted to detailed exploratory analysis. The results show that neither a specific trend nor pattern can be found that would justify the accusations. On the contrary, the findings suggests that, if anything, a shift in the opposite direction seems to be occurring."
 output:
   pdf_document:
     number_sections: yes
@@ -12,8 +14,6 @@ output:
 editor_options:
   chunk_output_type: console
 ---
-
-
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = FALSE)
@@ -301,7 +301,6 @@ data$pred_afd = svm_pred_afd
 
 ``` 
 
-
 ```{r quanteda setup}
 # create corpus
 data_corpus <- corpus(data, docid_field = "ID", text_field = "Text")
@@ -350,10 +349,6 @@ data_rauh <- left_join(data, data_rauh)
 # turn NAs into 0
 data_rauh[is.na(data_rauh)] <- 0
 ```
-
-# Abstract
-In recent years, the Neue Zürcher Zeitung (NZZ), a major newspaper based in Switzerland, has come under fire from allegations that its content and political view have shifted increasingly to the political right. This paper examines these claims by analyzing headlines and teasers of NZZ articles based on their sentiment and evaluates if such a shift truly came into effect. For this, a total of 17'095 articles of the front pages of nzz.ch between 2013 and 2020 are scraped from the web. To test the claims made, the data is filtered into two topics, immigration and the far-right German party "Alternative für Deutschland" (AfD), which is then submitted to detailed exploratory analysis. The results show that neither a specific trend nor pattern can be found that would justify the accusations. On the contrary, the findings suggests that, if anything, a shift in the opposite direction seems to be occurring.
-
 # Introduction
 After the appointments of Eric Gujer, a well known conservative, as editor-in-chief of the Swiss newspaper "Neue Zürcher Zeitung" (NZZ) in 2015 and René Scheu as the head editor of its feature section in 2016, followed by multiple departures by or firings of other editors, NZZ was criticized by some peer publications to have embarked on a shift towards the political right (called a "Rechtsruck" in German).^[See e.g. Surber, 12.10.2017; Daum & Shaller, 16.12.2017; Aschenbrenner et al., 2017; later prominently Brandt, 11.07.2019.] This paper will try to evaluate that claim by analyzing the front page of NZZ's online publication "nzz.ch", specifically its titles and teasers, in the time frame from 2013 to 2020.
 
